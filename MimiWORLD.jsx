@@ -438,20 +438,15 @@ export default function MimiWorld() {
   const [modal, setModal] = useState(null);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const result = await window.storage.get(STORAGE_KEY);
-        if (result && result.value) {
-          setData(JSON.parse(result.value));
-        }
-      } catch(e) {}
-    };
-    load();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setData(JSON.parse(raw));
+    } catch(e) {}
   }, []);
 
-  const save = async (d) => {
+  const save = (d) => {
     setData(d);
-    try { await window.storage.set(STORAGE_KEY, JSON.stringify(d)); } catch(e) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch(e) {}
   };
   const login = () => { if (pw === APP_PASSWORD) { setLoggedIn(true); setPwErr(""); } else setPwErr("Wrong password. Try again."); };
 
@@ -526,11 +521,12 @@ export default function MimiWorld() {
 function Dashboard({ data, save, setModal, today }) {
   const activeLoans = data.loans.filter(l => l.status !== "cleared");
   const arrears = activeLoans.filter(l => l.status === "arrears");
+  const todayAccount = data.dailyAccounts.find(a => a.date === today);
   const prevAccount = (() => {
     const sorted = [...data.dailyAccounts].sort((a,b) => b.date.localeCompare(a.date));
     return sorted.find(a => a.date < today);
   })();
-  const prevBalance = prevAccount ? prevAccount.closingBalance : 0;
+  const prevBalance = todayAccount?.openingBalance ?? (prevAccount ? prevAccount.closingBalance : 0);
   const moneyIn = data.loans.flatMap(l => l.payments||[]).filter(p => p.date===today).reduce((s,p)=>s+p.amount,0);
   const moneyOut = data.loans.filter(l => l.startDate===today).reduce((s,l)=>s+l.principal,0);
   const totalAvail = prevBalance + moneyIn;
@@ -917,21 +913,42 @@ function RecordPaymentModal({ data, save, close, loanId, today }) {
 function SetBalanceModal({ data, save, close, today }) {
   const existing = data.dailyAccounts.find(a=>a.date===today);
   const [balance, setBalance] = useState(existing?.openingBalance?.toString()||"");
+  const [saved, setSaved] = useState(false);
   const submit = () => {
     const amt = parseFloat(balance);
-    if (isNaN(amt)) return alert("Enter a valid amount");
+    if (isNaN(amt) || balance === "") { alert("Please enter a valid amount"); return; }
     const updated = data.dailyAccounts.filter(a=>a.date!==today);
-    save({...data,dailyAccounts:[...updated,{date:today,openingBalance:amt,closingBalance:amt}]});
-    close();
+    const newEntry = {date:today, openingBalance:amt, closingBalance:amt};
+    const newData = {...data, dailyAccounts:[...updated, newEntry]};
+    save(newData);
+    setSaved(true);
+    setTimeout(() => close(), 1000);
   };
   return (
     <>
       <div className="modal-title">Set Opening Balance</div>
-      <div className="form-group"><label className="form-label">Opening Balance (GHS)</label><input className="form-input" type="number" placeholder="e.g. 500" value={balance} onChange={e=>setBalance(e.target.value)} /><div className="form-hint">The balance you are starting today with (from yesterday)</div></div>
-      <div className="row-flex">
-        <button className="btn btn-outline btn-full" onClick={close}>Cancel</button>
-        <button className="btn btn-primary btn-full" onClick={submit}>Set Balance</button>
-      </div>
+      {saved ? (
+        <div className="alert alert-success" style={{textAlign:"center",fontSize:15,padding:20}}>
+          ✅ Balance set to {fmt(parseFloat(balance))}!
+        </div>
+      ) : (
+        <>
+          <div className="form-group">
+            <label className="form-label">Opening Balance (GHS)</label>
+            <input className="form-input" type="number" placeholder="e.g. 500" value={balance} onChange={e=>setBalance(e.target.value)} />
+            <div className="form-hint">Enter the cash balance you are starting today with</div>
+          </div>
+          {balance !== "" && !isNaN(parseFloat(balance)) && (
+            <div className="calc-preview" style={{marginBottom:14}}>
+              <div className="calc-row"><span>Opening Balance</span><span style={{color:"var(--gold)",fontWeight:700}}>{fmt(parseFloat(balance))}</span></div>
+            </div>
+          )}
+          <div className="row-flex">
+            <button className="btn btn-outline btn-full" onClick={close}>Cancel</button>
+            <button className="btn btn-primary btn-full" onClick={submit}>✅ Set Balance</button>
+          </div>
+        </>
+      )}
     </>
   );
 }
